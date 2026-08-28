@@ -94,8 +94,8 @@ build_slice() {
 }
 
 # tvOS
-build_slice aarch64-apple-tvos     appletvos        "-mtvos-version-min=17.0"
-build_slice aarch64-apple-tvos-sim appletvsimulator "-mtvos-simulator-version-min=17.0"
+TVOS_DEPLOYMENT_TARGET=16.0 build_slice aarch64-apple-tvos     appletvos        "-mtvos-version-min=16.0"
+TVOS_DEPLOYMENT_TARGET=16.0 build_slice aarch64-apple-tvos-sim appletvsimulator "-mtvos-simulator-version-min=16.0"
 # iOS
 build_slice aarch64-apple-ios      iphoneos         "-mios-version-min=16.0"
 build_slice aarch64-apple-ios-sim  iphonesimulator  "-mios-simulator-version-min=16.0"

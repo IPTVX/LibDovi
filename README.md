@@ -26,7 +26,7 @@ Used by [AetherEngine](https://github.com/superuser404notfound/AetherEngine) to 
 - `xros-arm64` (device)
 - `xros-arm64-simulator` (Apple Silicon only)
 
-Minimum deployment tvOS 17.0 / iOS 16.0 / visionOS 1.0. The tvOS and visionOS simulators stay arm64-only: there is no Intel Vision Pro, and `x86_64-apple-tvos` is a low-tier Rust target with no prebuilt std (would need nightly + `-Z build-std`) whose Intel-Mac tvOS-simulator use is not worth that cost. Everything is built with stable Rust.
+Minimum deployment tvOS 16.0 / iOS 16.0 / visionOS 1.0. The tvOS and visionOS simulators stay arm64-only: there is no Intel Vision Pro, and `x86_64-apple-tvos` is a low-tier Rust target with no prebuilt std (would need nightly + `-Z build-std`) whose Intel-Mac tvOS-simulator use is not worth that cost. Everything is built with stable Rust.
 
 ## Rebuilding
 
