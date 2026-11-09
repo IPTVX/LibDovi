@@ -7,12 +7,18 @@ Used by [AetherEngine](https://github.com/superuser404notfound/AetherEngine) to 
 ## Consuming
 
 ```swift
-.package(url: "https://github.com/superuser404notfound/LibDovi", from: "2.1.0"),
+.package(url: "https://github.com/IPTVX/LibDovi", exact: "2.2.0-iptvx"),
 // then add the product:
 .product(name: "Dovi", package: "LibDovi"),
 ```
 
 `import Dovi` exposes the libdovi C API (`dovi_parse_unspec62_nalu`, `dovi_convert_rpu_with_mode`, `dovi_write_unspec62_nalu`, the free functions, etc.).
+
+## Additions to the upstream C API
+
+`patches/` holds additions to the C API, applied by `build.sh` on top of the pinned dovi_tool tag. They only add entry points; nothing upstream is changed or removed.
+
+- `dovi_rpu_set_polynomial_mapping(rpu, component, pivots, num_pivots, coefs)` replaces one component's reshaping curve with a piecewise second-order polynomial: 2 to 9 absolute pivots, and `c0, c1, c2` per piece in the normalised domain (`out = c0 + c1*x + c2*x^2`, input and output in [0, 1]). It accepts only profile 8 RPUs with fixed-point coefficients, splits each coefficient into its integer and `coefficient_log2_denom` fraction parts, and marks the RPU modified so the CRC is rewritten on the next write.
 
 ## Slices
 
@@ -43,6 +49,31 @@ cargo install cargo-c
 
 The prebuilt `Dovi.xcframework` is committed (mirroring FFmpegBuild), so consumers do not need a Rust toolchain.
 
+## Build record
+
+The library is built on a local Mac, not in CI, so there is no attestation. `./build.sh` writes [`BUILD-INFO.txt`](BUILD-INFO.txt) instead: the dovi_tool tag and commit, Xcode, clang, SDK, rustc, cargo and cargo-c versions, the resolved dependency tree, and the SHA-256 of every shipped `libdovi.a` and header. The build runs with `--locked` against the `Cargo.lock` the crate ships at its tag, and a copy of that lock is committed as [`BUILD-INFO.Cargo.lock`](BUILD-INFO.Cargo.lock).
+
+The first record was written by a rebuild of 2.1.0 with this toolchain, and every `libdovi.a` it produced is byte-identical to the one committed for 2.1.0, so it describes those binaries as well. Earlier releases have no record.
+
 ## License
 
 libdovi is dual-licensed MIT / Apache-2.0 (see the upstream dovi_tool repository) and is consumed here under the MIT option. The packaging in this repo (build script, SwiftPM stubs) is MIT, see [LICENSE](LICENSE). No additional restrictions.
+
+## Fork compatibility policy
+
+`2.2.0-iptvx` merges upstream `2.2.0` (`caff700968700467c089a3f38c8b4180620518b5`)
+while retaining the iOS/tvOS 16 package requirement and tvOS 16 rebuild environment.
+The shipped archives and headers are byte-identical to upstream 2.2.0; the upstream
+`BUILD-INFO.txt` describes their build, not a new local rebuild. A recursive audit
+checks all 3,809 Mach-O members across seven slices and nine architectures. Every
+member's minimum OS is within iOS/tvOS 16, macOS 14 or visionOS 1. All architectures
+export the new polynomial-mapping API. There are no separate downloadable assets:
+the committed XCFramework is the SwiftPM artifact.
+
+Run `python3 Scripts/verify_binary_compatibility.py` after every dependency update.
+Run `Scripts/validate_apple_slices.sh` as a FlowDeck aggregate target: it links all
+nine architecture/platform combinations at the required floors and executes the
+C ABI regression on the Mac. The regression verifies polynomial mapping through
+serialization/reparse and rejects null pointers, invalid components/counts,
+unordered pivots and nonfinite coefficients. These checks do not establish
+playback acceptance or execution on an actual OS 16 device.

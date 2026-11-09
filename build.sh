@@ -69,18 +69,34 @@ else
 fi
 
 CRATE_DIR="$DOVI_REPO_DIR/dolby_vision"
+
+# Local additions to the C API, kept as patches against the pinned tag. A checkout that already
+# carries a patch is left alone; one that carries something else fails the build instead of
+# packaging an xcframework whose header does not match the patch set.
+for patch in "$SCRIPT_DIR"/patches/*.patch; do
+    [ -e "$patch" ] || continue
+    if git -C "$DOVI_REPO_DIR" apply --reverse --check "$patch" 2>/dev/null; then
+        echo "==> Patch already applied: $(basename "$patch")"
+    else
+        echo "==> Applying patch: $(basename "$patch")"
+        git -C "$DOVI_REPO_DIR" apply "$patch"
+    fi
+done
 if [ ! -f "$CRATE_DIR/Cargo.toml" ]; then
     echo "ERROR: dolby_vision crate not found at $CRATE_DIR" >&2
     exit 1
 fi
 
+# --locked: the crate ships its Cargo.lock at the tag, and without the flag cargo would quietly
+# re-resolve whenever that lock no longer satisfies the manifest, so a rebuild could pull other
+# dependency versions than the release it claims to reproduce. With it, a stale lock fails the build.
 # build_slice <triple> <sdk-or-empty> <min-cflag-or-empty>
 build_slice() {
     local triple="$1" sdk="$2" mincflag="$3"
     echo "==> Building $triple..."
     if [ -z "$sdk" ]; then
         ( cd "$CRATE_DIR"
-          cargo cbuild --release --features capi \
+          cargo cbuild --release --locked --features capi \
             --target "$triple" --target-dir "$CARGO_DIR" )
     else
         local sdkpath cc
@@ -88,7 +104,7 @@ build_slice() {
         cc="$(xcrun --sdk "$sdk" --find clang)"
         ( cd "$CRATE_DIR"
           CC="$cc" CFLAGS="-isysroot $sdkpath $mincflag" \
-          cargo cbuild --release --features capi \
+          cargo cbuild --release --locked --features capi \
             --target "$triple" --target-dir "$CARGO_DIR" )
     fi
 }
@@ -177,6 +193,51 @@ xcodebuild -create-xcframework \
     -library "$STAGE_DIR/xros/libdovi.a"       -headers "$STAGE_DIR/xros/Headers" \
     -library "$STAGE_DIR/xros-sim/libdovi.a"   -headers "$STAGE_DIR/xros-sim/Headers" \
     -output "$XCFW_OUT"
+
+# Build record. The xcframework is built on a local Mac, not in CI, so this file is the provenance a
+# consumer gets: inputs, toolchain, the resolved dependency tree and the hash of every shipped
+# library. The lock the build used is committed beside it, in case the upstream tag ever moves.
+INFO_OUT="$SCRIPT_DIR/BUILD-INFO.txt"
+LOCK_OUT="$SCRIPT_DIR/BUILD-INFO.Cargo.lock"
+cp "$CRATE_DIR/Cargo.lock" "$LOCK_OUT"
+DIRTY=""
+git -C "$SCRIPT_DIR" diff --quiet HEAD -- build.sh || DIRTY=" (build.sh differs from it)"
+{
+    echo "# LibDovi build record"
+    echo ""
+    echo "Written by build.sh after packaging."
+    echo ""
+    echo "Built      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "Repo HEAD  $(git -C "$SCRIPT_DIR" rev-parse HEAD)$DIRTY"
+    echo "build.sh   sha256 $(shasum -a 256 "$SCRIPT_DIR/build.sh" | cut -d' ' -f1)"
+    echo ""
+    echo "## Host and toolchain"
+    echo "macOS      $(sw_vers -productVersion) ($(sw_vers -buildVersion)), $(uname -m)"
+    echo "Xcode      $(xcodebuild -version | tr '\n' ' ' | sed 's/ $//')"
+    echo "clang      $(xcrun clang --version | sed -n 1p)"
+    for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator macosx; do
+        echo "SDK        $sdk $(xcrun --sdk "$sdk" --show-sdk-version) ($(xcrun --sdk "$sdk" --show-sdk-build-version))"
+    done
+    echo "rustup     $(rustup show active-toolchain | sed -n 1p)"
+    rustc -vV | sed 's/^/rustc      /'
+    echo "cargo      $(cargo --version)"
+    echo "cargo-c    $(cargo cbuild --version)"
+    echo ""
+    echo "## Source"
+    echo "dovi_tool  $DOVI_TAG $(git -C "$DOVI_REPO_DIR" rev-parse HEAD)"
+    echo "crate      dolby_vision, cargo cbuild --release --locked --features capi"
+    echo "Cargo.lock sha256 $(shasum -a 256 "$CRATE_DIR/Cargo.lock" | cut -d' ' -f1) (copy: BUILD-INFO.Cargo.lock)"
+    echo ""
+    echo "## Resolved dependencies (aarch64-apple-tvos; the lock is shared by every slice)"
+    ( cd "$CRATE_DIR" && cargo tree --locked --features capi --target aarch64-apple-tvos -e normal,build ) \
+        | sed "s#$DOVI_REPO_DIR#<dovi_tool>#"
+    echo ""
+    echo "## Shipped files (sha256)"
+    ( cd "$SCRIPT_DIR" && find Dovi.xcframework -type f \( -name 'libdovi.a' -o -name 'dovi.h' \) | sort | while read -r f; do
+        echo "$(shasum -a 256 "$f" | cut -d' ' -f1)  $f"
+    done )
+} > "$INFO_OUT"
+echo "==> Build record written to BUILD-INFO.txt"
 
 echo ""
 echo "==> Done. XCFramework at: $XCFW_OUT"
